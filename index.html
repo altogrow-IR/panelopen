@@ -14,6 +14,9 @@
           <p id="statusText">立ち絵画像を読み込んでください。</p>
         </div>
 
+        <details class="controls-details" open>
+          <summary>操作パネル</summary>
+          <div class="controls-body">
         <label class="file-button">
           <input id="imageInput" type="file" accept="image/*">
           <span>立ち絵を読み込む</span>
@@ -34,8 +37,44 @@
 
         <label class="color-row">
           <span>シルエット色</span>
-          <input id="silhouetteColorInput" type="color" value="#111820">
+          <select id="silhouetteColorSelect" aria-label="シルエット色"></select>
         </label>
+
+        <label class="color-row">
+          <span>境界線の色</span>
+          <select id="boundaryColorSelect" aria-label="境界線の色"></select>
+        </label>
+
+        <fieldset class="overlay-group">
+          <legend>シルエット上の文字・画像</legend>
+          <label>
+            <span>追加する文字</span>
+            <input id="overlayTextInput" type="text" maxlength="40" placeholder="例: OPEN">
+          </label>
+          <label>
+            <span>文字色</span>
+            <select id="overlayTextColorSelect" aria-label="文字色"></select>
+          </label>
+          <label>
+            <span>文字フォント</span>
+            <select id="overlayTextFontSelect" aria-label="文字フォント"></select>
+          </label>
+          <label>
+            <span>文字サイズ</span>
+            <input id="overlayTextSizeInput" type="range" min="18" max="96" value="42">
+          </label>
+          <button id="addOverlayTextButton" type="button">文字を追加</button>
+          <label class="file-button compact">
+            <input id="overlayImageInput" type="file" accept="image/*">
+            <span>画像を追加</span>
+          </label>
+          <label>
+            <span>画像サイズ</span>
+            <input id="overlayImageSizeInput" type="range" min="10" max="90" value="38">
+          </label>
+          <div id="overlayList" class="overlay-list" aria-live="polite"></div>
+          <button id="removeSelectedOverlayButton" type="button">選択中の文字・画像を消す</button>
+        </fieldset>
 
         <fieldset class="mode-group">
           <legend>モード</legend>
@@ -53,10 +92,13 @@
           境界線を引くモードでは、始点をタップしてから終点をタップします。
           線がシルエットを分割し、分割された部位ごとに開けられます。
         </p>
+          </div>
+        </details>
       </section>
 
       <section class="stage" aria-label="キャンバス">
         <canvas id="mainCanvas" width="640" height="760"></canvas>
+        <textarea id="inlineTextEditor" class="inline-text-editor" rows="1" maxlength="40" aria-label="文字を直接編集"></textarea>
       </section>
     </main>
 

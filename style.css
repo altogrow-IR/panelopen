@@ -24,7 +24,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -40,6 +41,20 @@ input {
   flex-direction: column;
   gap: 14px;
   padding: 20px 16px;
+}
+
+.controls-details {
+  display: contents;
+}
+
+.controls-details summary {
+  display: none;
+}
+
+.controls-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .title-block h1 {
@@ -83,6 +98,11 @@ button {
   touch-action: manipulation;
 }
 
+.file-button.compact span {
+  min-height: 38px;
+  font-size: 13px;
+}
+
 button:active,
 .file-button span:active {
   background: #f6bd48;
@@ -95,7 +115,8 @@ button:active,
 
 .toggle-row,
 .color-row,
-.mode-group label {
+.mode-group label,
+.overlay-group label {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -107,13 +128,71 @@ button:active,
   justify-content: space-between;
 }
 
-.color-row input {
-  width: 52px;
+.color-row select,
+.overlay-group select {
+  width: 128px;
   height: 34px;
   border: 1px solid var(--panel-soft);
   border-radius: 4px;
-  padding: 2px;
+  padding: 2px 6px;
   background: #ffffff;
+  color: #17252d;
+}
+
+.overlay-group {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--panel-soft);
+}
+
+.overlay-group legend {
+  padding: 0 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.overlay-group label {
+  justify-content: space-between;
+}
+
+.overlay-group input[type="text"] {
+  width: 150px;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--panel-soft);
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #ffffff;
+  color: #17252d;
+}
+
+.overlay-group input[type="range"] {
+  width: 150px;
+  accent-color: var(--accent-strong);
+}
+
+.overlay-list {
+  display: grid;
+  gap: 6px;
+  max-height: 130px;
+  overflow: auto;
+}
+
+.overlay-list button {
+  min-height: 34px;
+  justify-content: flex-start;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.overlay-list button.is-selected {
+  background: var(--accent-strong);
+  color: #102025;
 }
 
 .mode-group {
@@ -137,6 +216,7 @@ button:active,
 }
 
 .stage {
+  position: relative;
   display: grid;
   place-items: center;
   min-width: 0;
@@ -152,16 +232,83 @@ button:active,
   touch-action: none;
 }
 
+.inline-text-editor {
+  position: absolute;
+  z-index: 2;
+  display: none;
+  min-width: 80px;
+  min-height: 38px;
+  border: 2px dashed var(--accent);
+  border-radius: 2px;
+  padding: 2px 6px;
+  overflow: hidden;
+  resize: none;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111820;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  outline: 0;
+}
+
+.inline-text-editor.is-active {
+  display: block;
+}
+
 @media (max-width: 780px) {
   .app-shell {
     min-height: 100svh;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    display: flex;
+    flex-direction: column;
   }
 
   .toolbar {
+    order: 2;
     padding: 14px;
     gap: 10px;
+  }
+
+  .controls-details {
+    display: block;
+  }
+
+  .controls-details summary {
+    min-height: 44px;
+    border-radius: 4px;
+    background: var(--accent-strong);
+    color: #102025;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 12px;
+    font-weight: 700;
+    cursor: pointer;
+    list-style: none;
+    touch-action: manipulation;
+  }
+
+  .controls-details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .controls-details summary::after {
+    content: "閉じる";
+    margin-left: 10px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .controls-details:not([open]) summary::after {
+    content: "開く";
+  }
+
+  .controls-body {
+    gap: 10px;
+    padding-top: 10px;
+  }
+
+  .controls-details:not([open]) .controls-body {
+    display: none;
   }
 
   .title-block {
@@ -202,17 +349,31 @@ button:active,
     grid-column: 1 / -1;
   }
 
+  .color-row select,
+  .overlay-group select,
+  .overlay-group input[type="text"],
+  .overlay-group input[type="range"] {
+    width: min(56vw, 190px);
+  }
+
   .hint {
     margin: 0;
     font-size: 12px;
   }
 
   .stage {
-    padding: 10px;
+    order: 1;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 8px 10px 10px;
     align-items: start;
+    background: var(--bg);
+    box-shadow: 0 1px 0 rgba(38, 50, 56, 0.16);
   }
 
   #mainCanvas {
+    width: min(100%, 520px);
     max-height: none;
   }
 }
