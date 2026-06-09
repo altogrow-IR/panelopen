@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>シルエットパネル開け Web版</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="toolbar" aria-label="操作パネル">
+        <div class="title-block">
+          <h1>シルエット<br>パネル開け</h1>
+          <p id="statusText">立ち絵画像を読み込んでください。</p>
+        </div>
+
+        <label class="file-button">
+          <input id="imageInput" type="file" accept="image/*">
+          <span>立ち絵を読み込む</span>
+        </label>
+
+        <div class="button-grid">
+          <button id="resetButton" type="button">境界線をリセット</button>
+          <button id="cancelLineButton" type="button">現在の線をキャンセル</button>
+          <button id="removeLineButton" type="button">最後の線を消す</button>
+          <button id="openAllButton" type="button">すべて開ける</button>
+          <button id="closeAllButton" type="button">すべて閉じる</button>
+        </div>
+
+        <label class="toggle-row">
+          <input id="showLinesInput" type="checkbox" checked>
+          <span>境界線を表示</span>
+        </label>
+
+        <label class="color-row">
+          <span>シルエット色</span>
+          <input id="silhouetteColorInput" type="color" value="#111820">
+        </label>
+
+        <fieldset class="mode-group">
+          <legend>モード</legend>
+          <label>
+            <input type="radio" name="mode" value="open" checked>
+            <span>パネルを開ける</span>
+          </label>
+          <label>
+            <input type="radio" name="mode" value="line">
+            <span>境界線を引く</span>
+          </label>
+        </fieldset>
+
+        <p class="hint">
+          境界線を引くモードでは、始点をタップしてから終点をタップします。
+          線がシルエットを分割し、分割された部位ごとに開けられます。
+        </p>
+      </section>
+
+      <section class="stage" aria-label="キャンバス">
+        <canvas id="mainCanvas" width="640" height="760"></canvas>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
