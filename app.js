@@ -4,6 +4,10 @@ const IMAGE_MARGIN = 24;
 const ALPHA_THRESHOLD = 24;
 const BOUNDARY_WIDTH = 7;
 const MIN_PANEL_PIXELS = 40;
+const PROJECT_FILE_VERSION = 1;
+const AUTOSAVE_DB_NAME = "panel-opener-autosave";
+const AUTOSAVE_STORE_NAME = "projects";
+const AUTOSAVE_KEY = "latest";
 
 const canvas = document.getElementById("mainCanvas");
 const ctx = canvas.getContext("2d");
@@ -12,9 +16,14 @@ const inlineTextEditor = document.getElementById("inlineTextEditor");
 const statusText = document.getElementById("statusText");
 const controlsDetails = document.querySelector(".controls-details");
 const imageInput = document.getElementById("imageInput");
+const importProjectInput = document.getElementById("importProjectInput");
+const exportProjectButton = document.getElementById("exportProjectButton");
 const showLinesInput = document.getElementById("showLinesInput");
 const silhouetteColorSelect = document.getElementById("silhouetteColorSelect");
 const boundaryColorSelect = document.getElementById("boundaryColorSelect");
+const backgroundColorSelect = document.getElementById("backgroundColorSelect");
+const backgroundImageInput = document.getElementById("backgroundImageInput");
+const clearBackgroundImageButton = document.getElementById("clearBackgroundImageButton");
 const overlayTextInput = document.getElementById("overlayTextInput");
 const overlayTextColorSelect = document.getElementById("overlayTextColorSelect");
 const overlayTextFontSelect = document.getElementById("overlayTextFontSelect");
@@ -25,6 +34,9 @@ const overlayImageSizeInput = document.getElementById("overlayImageSizeInput");
 const overlayList = document.getElementById("overlayList");
 const overlayGroup = document.querySelector(".overlay-group");
 const removeSelectedOverlayButton = document.getElementById("removeSelectedOverlayButton");
+const saveImagePanel = document.getElementById("saveImagePanel");
+const saveImagePreview = document.getElementById("saveImagePreview");
+const closeSaveImagePanelButton = document.getElementById("closeSaveImagePanelButton");
 
 const COLOR_PALETTE = [
   { name: "黒", value: "#111820" },
@@ -60,6 +72,7 @@ const TEXT_FONTS = [
 
 const state = {
   originalImage: null,
+  originalImageDataUrl: "",
   displayCanvas: null,
   silhouetteCanvas: null,
   characterMask: null,
@@ -74,6 +87,9 @@ const state = {
   pendingLineStart: null,
   openedPanels: new Set(),
   mode: "open",
+  backgroundColor: "#ffffff",
+  backgroundImage: null,
+  backgroundImageDataUrl: "",
   silhouetteColor: "#111820",
   boundaryColor: "#42d9c8",
   overlayTextColor: "#ffffff",
@@ -86,6 +102,9 @@ const state = {
   dragOverlay: null,
   inlineEditing: null,
   lastOverlayTap: null,
+  longPressTimer: null,
+  autosaveTimer: null,
+  restoringProject: false,
 };
 
 function setupColorSelect(select, selectedValue) {
@@ -115,6 +134,78 @@ function setupResponsiveControls() {
   } else {
     controlsDetails.open = true;
   }
+}
+
+function openAutosaveDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(AUTOSAVE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(AUTOSAVE_STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("自動保存データベースを開けませんでした。"));
+  });
+}
+
+async function saveAutosaveProject() {
+  if (!state.originalImageDataUrl || state.restoringProject) return;
+
+  const db = await openAutosaveDb();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(AUTOSAVE_STORE_NAME, "readwrite");
+    transaction.objectStore(AUTOSAVE_STORE_NAME).put(buildProjectData(), AUTOSAVE_KEY);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error || new Error("自動保存に失敗しました。"));
+  });
+  db.close();
+}
+
+function scheduleAutosave() {
+  if (!state.originalImageDataUrl || state.restoringProject) return;
+  if (state.autosaveTimer) window.clearTimeout(state.autosaveTimer);
+  state.autosaveTimer = window.setTimeout(() => {
+    state.autosaveTimer = null;
+    saveAutosaveProject().catch((error) => {
+      console.warn(error);
+    });
+  }, 800);
+}
+
+async function loadAutosaveProject() {
+  const db = await openAutosaveDb();
+  const project = await new Promise((resolve, reject) => {
+    const transaction = db.transaction(AUTOSAVE_STORE_NAME, "readonly");
+    const request = transaction.objectStore(AUTOSAVE_STORE_NAME).get(AUTOSAVE_KEY);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || new Error("自動保存データを読み込めませんでした。"));
+  });
+  db.close();
+  return project;
+}
+
+async function restoreAutosaveOnStartup() {
+  try {
+    const project = await loadAutosaveProject();
+    if (!project) return;
+    if (!confirm("前回の自動保存データがあります。復元しますか？")) return;
+    await applyProjectData(project, { confirmReplace: false });
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
+function drawBackground(targetCtx, width = CANVAS_WIDTH, height = CANVAS_HEIGHT) {
+  targetCtx.fillStyle = state.backgroundColor;
+  targetCtx.fillRect(0, 0, width, height);
+
+  if (!state.backgroundImage) return;
+
+  const scale = Math.max(width / state.backgroundImage.naturalWidth, height / state.backgroundImage.naturalHeight);
+  const imageW = state.backgroundImage.naturalWidth * scale;
+  const imageH = state.backgroundImage.naturalHeight * scale;
+  const x = (width - imageW) / 2;
+  const y = (height - imageH) / 2;
+  targetCtx.drawImage(state.backgroundImage, x, y, imageW, imageH);
 }
 
 function selectedOverlayObject() {
@@ -170,7 +261,7 @@ function overlayLabel(object) {
 
 function addTextOverlay() {
   if (!state.displayCanvas) {
-    alert("先に立ち絵画像を読み込んでください。");
+    alert("先に立ち絵/一枚絵画像を読み込んでください。");
     return;
   }
 
@@ -199,8 +290,8 @@ function addTextOverlay() {
     color: overlayTextColorSelect.value,
     font: overlayTextFontSelect.value,
     size: Number(overlayTextSizeInput.value),
-    x: state.imageW ? state.imageW / 2 : CANVAS_WIDTH / 2,
-    y: state.imageH ? state.imageH / 2 : CANVAS_HEIGHT / 2,
+    x: CANVAS_WIDTH / 2,
+    y: CANVAS_HEIGHT / 2,
   };
   state.nextOverlayId += 1;
   state.overlayObjects.push(object);
@@ -210,9 +301,9 @@ function addTextOverlay() {
   redraw();
 }
 
-function addImageOverlay(image, name) {
+function addImageOverlay(image, name, dataUrl) {
   if (!state.displayCanvas) {
-    alert("先に立ち絵画像を読み込んでください。");
+    alert("先に立ち絵/一枚絵画像を読み込んでください。");
     return;
   }
 
@@ -221,9 +312,10 @@ function addImageOverlay(image, name) {
     type: "image",
     image,
     name,
+    dataUrl,
     size: Number(overlayImageSizeInput.value),
-    x: state.imageW ? state.imageW / 2 : CANVAS_WIDTH / 2,
-    y: state.imageH ? state.imageH / 2 : CANVAS_HEIGHT / 2,
+    x: CANVAS_WIDTH / 2,
+    y: CANVAS_HEIGHT / 2,
   };
   state.nextOverlayId += 1;
   state.overlayObjects.push(object);
@@ -240,6 +332,249 @@ function removeSelectedOverlay() {
   syncOverlayControls();
   updateOverlayList();
   redraw();
+}
+
+function serializeOverlayObject(object) {
+  if (object.type === "text") {
+    return {
+      id: object.id,
+      type: "text",
+      text: object.text,
+      color: object.color,
+      font: object.font || state.overlayTextFont,
+      size: object.size,
+      x: object.x,
+      y: object.y,
+    };
+  }
+
+  return {
+    id: object.id,
+    type: "image",
+    name: object.name,
+    dataUrl: object.dataUrl,
+    size: object.size,
+    x: object.x,
+    y: object.y,
+  };
+}
+
+function buildProjectData() {
+  return {
+    app: "web-panel-opener",
+    version: PROJECT_FILE_VERSION,
+    exportedAt: new Date().toISOString(),
+    canvas: {
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+    },
+    originalImage: {
+      dataUrl: state.originalImageDataUrl,
+    },
+    settings: {
+      showLines: showLinesInput.checked,
+      backgroundColor: state.backgroundColor,
+      backgroundImageDataUrl: state.backgroundImageDataUrl,
+      silhouetteColor: state.silhouetteColor,
+      boundaryColor: state.boundaryColor,
+      overlayTextColor: state.overlayTextColor,
+      overlayTextFont: state.overlayTextFont,
+      overlayTextSize: state.overlayTextSize,
+      overlayImageSize: state.overlayImageSize,
+      mode: state.mode,
+    },
+    boundaryLines: state.boundaryLines,
+    openedPanels: [...state.openedPanels],
+    overlayCoordinateSpace: "canvas",
+    overlayObjects: state.overlayObjects.map(serializeOverlayObject),
+    nextOverlayId: state.nextOverlayId,
+  };
+}
+
+function exportProject() {
+  if (!state.originalImageDataUrl) {
+    alert("先に立ち絵/一枚絵画像を読み込んでください。");
+    return;
+  }
+
+  if (state.inlineEditing) {
+    commitInlineTextEdit();
+  }
+
+  const json = JSON.stringify(buildProjectData(), null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  link.href = url;
+  link.download = `panel-opener-project-${date}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function applyImportedSettings(settings = {}) {
+  state.backgroundColor = settings.backgroundColor || "#ffffff";
+  state.backgroundImageDataUrl = settings.backgroundImageDataUrl || "";
+  state.silhouetteColor = settings.silhouetteColor || "#111820";
+  state.boundaryColor = settings.boundaryColor || "#42d9c8";
+  state.overlayTextColor = settings.overlayTextColor || "#ffffff";
+  state.overlayTextFont = settings.overlayTextFont || TEXT_FONTS[0].value;
+  state.overlayTextSize = Number(settings.overlayTextSize || 42);
+  state.overlayImageSize = Number(settings.overlayImageSize || 38);
+  state.mode = settings.mode === "line" ? "line" : "open";
+
+  backgroundColorSelect.value = state.backgroundColor;
+  silhouetteColorSelect.value = state.silhouetteColor;
+  boundaryColorSelect.value = state.boundaryColor;
+  overlayTextColorSelect.value = state.overlayTextColor;
+  overlayTextFontSelect.value = state.overlayTextFont;
+  overlayTextSizeInput.value = String(state.overlayTextSize);
+  overlayImageSizeInput.value = String(state.overlayImageSize);
+  showLinesInput.checked = settings.showLines !== false;
+
+  document.querySelectorAll('input[name="mode"]').forEach((input) => {
+    input.checked = input.value === state.mode;
+  });
+}
+
+async function applyImportedBackground() {
+  if (!state.backgroundImageDataUrl) {
+    state.backgroundImage = null;
+    return;
+  }
+
+  state.backgroundImage = await loadImageElement(state.backgroundImageDataUrl);
+}
+
+function numberOrFallback(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function sanitizeBoundaryLines(lines) {
+  if (!Array.isArray(lines)) return [];
+  return lines
+    .map((line) => ({
+      start: {
+        x: numberOrFallback(line?.start?.x, 0),
+        y: numberOrFallback(line?.start?.y, 0),
+      },
+      end: {
+        x: numberOrFallback(line?.end?.x, 0),
+        y: numberOrFallback(line?.end?.y, 0),
+      },
+    }))
+    .filter((line) => {
+      return (
+        line.start.x >= 0 &&
+        line.start.x < state.imageW &&
+        line.start.y >= 0 &&
+        line.start.y < state.imageH &&
+        line.end.x >= 0 &&
+        line.end.x < state.imageW &&
+        line.end.y >= 0 &&
+        line.end.y < state.imageH
+      );
+    });
+}
+
+async function deserializeOverlayObject(object, coordinateSpace = "image") {
+  if (!object || typeof object !== "object") return null;
+  const offsetX = coordinateSpace === "canvas" ? 0 : state.imageX;
+  const offsetY = coordinateSpace === "canvas" ? 0 : state.imageY;
+
+  if (object.type === "text") {
+    return {
+      id: Number(object.id) || state.nextOverlayId,
+      type: "text",
+      text: String(object.text || ""),
+      color: object.color || state.overlayTextColor,
+      font: object.font || state.overlayTextFont,
+      size: Number(object.size || state.overlayTextSize),
+      x: numberOrFallback(object.x, state.imageW / 2) + offsetX,
+      y: numberOrFallback(object.y, state.imageH / 2) + offsetY,
+    };
+  }
+
+  if (object.type === "image") {
+    const image = await loadImageElement(object.dataUrl);
+    return {
+      id: Number(object.id) || state.nextOverlayId,
+      type: "image",
+      image,
+      name: String(object.name || "image"),
+      dataUrl: object.dataUrl,
+      size: Number(object.size || state.overlayImageSize),
+      x: numberOrFallback(object.x, state.imageW / 2) + offsetX,
+      y: numberOrFallback(object.y, state.imageH / 2) + offsetY,
+    };
+  }
+
+  return null;
+}
+
+async function importProjectFromFile(file) {
+  try {
+    const text = await readFileAsText(file);
+    const project = JSON.parse(text);
+    await applyProjectData(project, { confirmReplace: true });
+  } catch (error) {
+    alert(error.message || "設定ファイルを読み込めませんでした。");
+  }
+}
+
+async function applyProjectData(project, options = {}) {
+  const shouldConfirm = options.confirmReplace !== false;
+  if (shouldConfirm && state.displayCanvas && !confirm("現在の設定を置き換えてインポートします。続行しますか？")) {
+    return;
+  }
+
+  if (!project || project.app !== "web-panel-opener" || !project.originalImage?.dataUrl) {
+    throw new Error("対応していない設定ファイルです。");
+  }
+
+  state.restoringProject = true;
+  try {
+    const originalImage = await loadImageElement(project.originalImage.dataUrl);
+    state.originalImage = originalImage;
+    state.originalImageDataUrl = project.originalImage.dataUrl;
+    applyImportedSettings(project.settings);
+    await applyImportedBackground();
+    prepareDisplayImages();
+
+    state.boundaryLines = sanitizeBoundaryLines(project.boundaryLines);
+    state.pendingLineStart = null;
+    state.selectedOverlayId = null;
+    state.dragOverlay = null;
+    state.inlineEditing = null;
+    state.openedPanels = new Set();
+    state.overlayObjects = [];
+    state.nextOverlayId = Number(project.nextOverlayId || 1);
+
+    const importedObjects = [];
+    const sourceObjects = Array.isArray(project.overlayObjects) ? project.overlayObjects : [];
+    const coordinateSpace = project.overlayCoordinateSpace === "canvas" ? "canvas" : "image";
+    for (const object of sourceObjects) {
+      const imported = await deserializeOverlayObject(object, coordinateSpace);
+      if (imported) importedObjects.push(imported);
+    }
+    state.overlayObjects = importedObjects;
+    const maxOverlayId = importedObjects.reduce((max, object) => Math.max(max, object.id), 0);
+    state.nextOverlayId = Math.max(state.nextOverlayId, maxOverlayId + 1);
+    state.overlayObjects.forEach(clampOverlayPosition);
+
+    rebuildPanels();
+    const openedPanels = Array.isArray(project.openedPanels) ? project.openedPanels : [];
+    state.openedPanels = new Set(openedPanels.filter((index) => Number.isInteger(index) && index >= 0 && index < state.panelMasks.length));
+    syncOverlayControls();
+    updateOverlayList();
+    redraw();
+  } finally {
+    state.restoringProject = false;
+    scheduleAutosave();
+  }
 }
 
 function clearSelectedOverlay() {
@@ -276,8 +611,8 @@ function positionInlineTextEditor(object) {
   const stageRect = stage.getBoundingClientRect();
   const scaleX = canvasRect.width / CANVAS_WIDTH;
   const scaleY = canvasRect.height / CANVAS_HEIGHT;
-  const left = canvasRect.left - stageRect.left + (state.imageX + rect.x) * scaleX;
-  const top = canvasRect.top - stageRect.top + (state.imageY + rect.y) * scaleY;
+  const left = canvasRect.left - stageRect.left + rect.x * scaleX;
+  const top = canvasRect.top - stageRect.top + rect.y * scaleY;
   const width = Math.max(90, rect.width * scaleX + 22);
   const height = Math.max(34, rect.height * scaleY + 10);
 
@@ -324,18 +659,17 @@ function finishInlineTextEdit() {
 
 function drawEmptyState() {
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-  ctx.fillStyle = "#f8fafb";
-  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  drawBackground(ctx);
   ctx.fillStyle = "#60717b";
   ctx.font = "700 18px system-ui";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("立ち絵画像を読み込んでください。", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
+  ctx.fillText("立ち絵/一枚絵画像を読み込んでください。", CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2);
 }
 
 function updateStatus() {
   if (!state.displayCanvas) {
-    statusText.textContent = "立ち絵画像を読み込んでください。";
+    statusText.textContent = "立ち絵/一枚絵画像を読み込んでください。";
     return;
   }
 
@@ -352,8 +686,7 @@ function updateStatus() {
 
 function redraw() {
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-  ctx.fillStyle = "#f8fafb";
-  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  drawBackground(ctx);
 
   if (!state.displayCanvas) {
     drawEmptyState();
@@ -363,6 +696,7 @@ function redraw() {
 
   const composed = composeRevealCanvas();
   ctx.drawImage(composed, state.imageX, state.imageY);
+  drawOverlayObjects(ctx);
 
   if (showLinesInput.checked) {
     drawBoundaryLines();
@@ -371,22 +705,52 @@ function redraw() {
   drawSelectedOverlayGuide();
 
   updateStatus();
+  scheduleAutosave();
 }
 
-function loadImageFromFile(file) {
-  const url = URL.createObjectURL(file);
-  const image = new Image();
-  image.onload = () => {
-    URL.revokeObjectURL(url);
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("ファイルを読み込めませんでした。"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("ファイルを読み込めませんでした。"));
+    reader.readAsText(file, "utf-8");
+  });
+}
+
+function loadImageElement(dataUrl) {
+  return new Promise((resolve, reject) => {
+    if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) {
+      reject(new Error("画像データの形式が正しくありません。"));
+      return;
+    }
+
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("画像を読み込めませんでした。"));
+    image.src = dataUrl;
+  });
+}
+
+async function loadImageFromFile(file) {
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const image = await loadImageElement(dataUrl);
     state.originalImage = image;
+    state.originalImageDataUrl = dataUrl;
     prepareDisplayImages();
     resetBoundaries();
-  };
-  image.onerror = () => {
-    URL.revokeObjectURL(url);
-    alert("画像を読み込めませんでした。");
-  };
-  image.src = url;
+  } catch (error) {
+    alert(error.message || "画像を読み込めませんでした。");
+  }
 }
 
 function prepareDisplayImages() {
@@ -507,6 +871,29 @@ function openAllPanels() {
 function closeAllPanels() {
   state.openedPanels = new Set();
   redraw();
+}
+
+function showSaveImagePreview() {
+  if (state.inlineEditing) {
+    commitInlineTextEdit();
+  }
+  redraw();
+  saveImagePreview.src = canvas.toDataURL("image/png");
+  saveImagePanel.hidden = false;
+}
+
+function startLongPressTimer() {
+  clearLongPressTimer();
+  state.longPressTimer = window.setTimeout(() => {
+    state.longPressTimer = null;
+    showSaveImagePreview();
+  }, 700);
+}
+
+function clearLongPressTimer() {
+  if (!state.longPressTimer) return;
+  window.clearTimeout(state.longPressTimer);
+  state.longPressTimer = null;
 }
 
 function rebuildPanels() {
@@ -631,6 +1018,7 @@ function composeRevealCanvas() {
     const fullReveal = document.createElement("canvas");
     fullReveal.width = state.imageW;
     fullReveal.height = state.imageH;
+    drawLocalBackground(fullReveal.getContext("2d"));
     fullReveal.getContext("2d").drawImage(state.displayCanvas, 0, 0);
     return fullReveal;
   }
@@ -639,6 +1027,7 @@ function composeRevealCanvas() {
   output.width = state.imageW;
   output.height = state.imageH;
   const outputCtx = output.getContext("2d");
+  drawLocalBackground(outputCtx);
   outputCtx.drawImage(state.silhouetteCanvas, 0, 0);
 
   const reveal = document.createElement("canvas");
@@ -664,18 +1053,32 @@ function composeRevealCanvas() {
   finalCanvas.width = state.imageW;
   finalCanvas.height = state.imageH;
   const finalCtx = finalCanvas.getContext("2d");
+  drawLocalBackground(finalCtx);
   finalCtx.drawImage(state.silhouetteCanvas, 0, 0);
-  drawSilhouetteOverlay(finalCtx);
   finalCtx.drawImage(output, 0, 0);
   return finalCanvas;
 }
 
-function drawSilhouetteOverlay(targetCtx) {
+function drawLocalBackground(targetCtx) {
+  targetCtx.fillStyle = state.backgroundColor;
+  targetCtx.fillRect(0, 0, state.imageW, state.imageH);
+
+  if (!state.backgroundImage) return;
+
+  const scale = Math.max(CANVAS_WIDTH / state.backgroundImage.naturalWidth, CANVAS_HEIGHT / state.backgroundImage.naturalHeight);
+  const imageW = state.backgroundImage.naturalWidth * scale;
+  const imageH = state.backgroundImage.naturalHeight * scale;
+  const x = (CANVAS_WIDTH - imageW) / 2 - state.imageX;
+  const y = (CANVAS_HEIGHT - imageH) / 2 - state.imageY;
+  targetCtx.drawImage(state.backgroundImage, x, y, imageW, imageH);
+}
+
+function drawOverlayObjects(targetCtx) {
   if (state.overlayObjects.length === 0) return;
 
   const overlay = document.createElement("canvas");
-  overlay.width = state.imageW;
-  overlay.height = state.imageH;
+  overlay.width = CANVAS_WIDTH;
+  overlay.height = CANVAS_HEIGHT;
   const overlayCtx = overlay.getContext("2d");
 
   for (const object of state.overlayObjects) {
@@ -695,15 +1098,13 @@ function drawSilhouetteOverlay(targetCtx) {
     }
   }
 
-  overlayCtx.globalCompositeOperation = "destination-in";
-  overlayCtx.drawImage(state.silhouetteCanvas, 0, 0);
   targetCtx.drawImage(overlay, 0, 0);
 }
 
 function overlayTextInfo(object) {
   const measureCanvas = document.createElement("canvas");
   const measureCtx = measureCanvas.getContext("2d");
-  const maxWidth = state.imageW * 0.9;
+  const maxWidth = CANVAS_WIDTH * 0.9;
   let fontSize = object.size;
   measureCtx.font = `700 ${fontSize}px ${object.font || state.overlayTextFont}`;
   while (fontSize > 14 && measureCtx.measureText(object.text).width > maxWidth) {
@@ -727,7 +1128,7 @@ function overlayObjectRect(object) {
     };
   }
 
-  const maxSide = Math.min(state.imageW, state.imageH) * (object.size / 100);
+  const maxSide = Math.min(CANVAS_WIDTH, CANVAS_HEIGHT) * (object.size / 100);
   const scale = Math.min(
     maxSide / object.image.naturalWidth,
     maxSide / object.image.naturalHeight
@@ -751,7 +1152,7 @@ function drawSelectedOverlayGuide() {
   ctx.strokeStyle = "#ffd166";
   ctx.lineWidth = 2;
   ctx.setLineDash([6, 4]);
-  ctx.strokeRect(state.imageX + rect.x, state.imageY + rect.y, rect.width, rect.height);
+  ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
   ctx.restore();
 }
 
@@ -784,6 +1185,16 @@ function getLocalPoint(event) {
   const x = Math.floor(canvasX - state.imageX);
   const y = Math.floor(canvasY - state.imageY);
   if (x < 0 || x >= state.imageW || y < 0 || y >= state.imageH) return null;
+  return { x, y };
+}
+
+function getCanvasPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = CANVAS_WIDTH / rect.width;
+  const scaleY = CANVAS_HEIGHT / rect.height;
+  const x = Math.floor((event.clientX - rect.left) * scaleX);
+  const y = Math.floor((event.clientY - rect.top) * scaleY);
+  if (x < 0 || x >= CANVAS_WIDTH || y < 0 || y >= CANVAS_HEIGHT) return null;
   return { x, y };
 }
 
@@ -906,8 +1317,8 @@ function clampOverlayPosition(object) {
   const rect = overlayObjectRect(object);
   const halfW = rect.width / 2;
   const halfH = rect.height / 2;
-  object.x = Math.min(Math.max(object.x, halfW), state.imageW - halfW);
-  object.y = Math.min(Math.max(object.y, halfH), state.imageH - halfH);
+  object.x = Math.min(Math.max(object.x, halfW), CANVAS_WIDTH - halfW);
+  object.y = Math.min(Math.max(object.y, halfH), CANVAS_HEIGHT - halfH);
 }
 
 function handleCanvasPointerDown(event) {
@@ -917,14 +1328,14 @@ function handleCanvasPointerDown(event) {
     commitInlineTextEdit();
   }
 
-  const point = getLocalPoint(event);
-  if (!point) {
+  const canvasPoint = getCanvasPoint(event);
+  if (!canvasPoint) {
     clearSelectedOverlay();
     if (state.mode === "line") handleCanvasTap(event);
     return;
   }
 
-  const overlayObject = overlayObjectAt(point.x, point.y);
+  const overlayObject = overlayObjectAt(canvasPoint.x, canvasPoint.y);
   if (overlayObject) {
     const now = Date.now();
     const isDoubleTap =
@@ -945,8 +1356,8 @@ function handleCanvasPointerDown(event) {
 
     state.dragOverlay = {
       id: overlayObject.id,
-      offsetX: point.x - overlayObject.x,
-      offsetY: point.y - overlayObject.y,
+      offsetX: canvasPoint.x - overlayObject.x,
+      offsetY: canvasPoint.y - overlayObject.y,
     };
     canvas.setPointerCapture(event.pointerId);
     redraw();
@@ -961,7 +1372,7 @@ function handleCanvasPointerMove(event) {
   if (!state.dragOverlay) return;
   event.preventDefault();
 
-  const point = getLocalPoint(event);
+  const point = getCanvasPoint(event);
   const selected = selectedOverlayObject();
   if (!point || !selected) return;
 
@@ -994,9 +1405,37 @@ showLinesInput.addEventListener("change", redraw);
 
 setupColorSelect(silhouetteColorSelect, state.silhouetteColor);
 setupColorSelect(boundaryColorSelect, state.boundaryColor);
+setupColorSelect(backgroundColorSelect, state.backgroundColor);
 setupColorSelect(overlayTextColorSelect, state.overlayTextColor);
 setupFontSelect(overlayTextFontSelect, state.overlayTextFont);
 
+backgroundColorSelect.addEventListener("change", () => {
+  state.backgroundColor = backgroundColorSelect.value;
+  redraw();
+});
+backgroundImageInput.addEventListener("change", (event) => {
+  const [file] = event.target.files;
+  if (!file) return;
+
+  readFileAsDataUrl(file)
+    .then((dataUrl) => Promise.all([loadImageElement(dataUrl), Promise.resolve(dataUrl)]))
+    .then(([image, dataUrl]) => {
+      state.backgroundImage = image;
+      state.backgroundImageDataUrl = dataUrl;
+      backgroundImageInput.value = "";
+      redraw();
+    })
+    .catch((error) => {
+      alert(error.message || "背景画像を読み込めませんでした。");
+      backgroundImageInput.value = "";
+    });
+});
+clearBackgroundImageButton.addEventListener("click", () => {
+  state.backgroundImage = null;
+  state.backgroundImageDataUrl = "";
+  backgroundImageInput.value = "";
+  redraw();
+});
 silhouetteColorSelect.addEventListener("change", () => {
   state.silhouetteColor = silhouetteColorSelect.value;
   if (state.characterMask) {
@@ -1059,18 +1498,25 @@ overlayImageInput.addEventListener("change", (event) => {
   const [file] = event.target.files;
   if (!file) return;
 
-  const url = URL.createObjectURL(file);
-  const image = new Image();
-  image.onload = () => {
-    URL.revokeObjectURL(url);
-    addImageOverlay(image, file.name);
-    overlayImageInput.value = "";
-  };
-  image.onerror = () => {
-    URL.revokeObjectURL(url);
-    alert("重ねる画像を読み込めませんでした。");
-  };
-  image.src = url;
+  readFileAsDataUrl(file)
+    .then((dataUrl) => Promise.all([loadImageElement(dataUrl), Promise.resolve(dataUrl)]))
+    .then(([image, dataUrl]) => {
+      addImageOverlay(image, file.name, dataUrl);
+      overlayImageInput.value = "";
+    })
+    .catch((error) => {
+      alert(error.message || "重ねる画像を読み込めませんでした。");
+      overlayImageInput.value = "";
+    });
+});
+exportProjectButton.addEventListener("click", exportProject);
+importProjectInput.addEventListener("change", (event) => {
+  const [file] = event.target.files;
+  if (file) {
+    importProjectFromFile(file).finally(() => {
+      importProjectInput.value = "";
+    });
+  }
 });
 removeSelectedOverlayButton.addEventListener("click", removeSelectedOverlay);
 
@@ -1082,11 +1528,19 @@ document.querySelectorAll('input[name="mode"]').forEach((input) => {
 });
 
 canvas.addEventListener("pointerdown", handleCanvasPointerDown);
+canvas.addEventListener("touchstart", startLongPressTimer, { passive: true });
+canvas.addEventListener("touchend", clearLongPressTimer);
+canvas.addEventListener("touchmove", clearLongPressTimer);
+canvas.addEventListener("touchcancel", clearLongPressTimer);
 canvas.addEventListener("pointermove", handleCanvasPointerMove);
 canvas.addEventListener("pointerup", handleCanvasPointerUp);
 canvas.addEventListener("pointercancel", handleCanvasPointerUp);
 inlineTextEditor.addEventListener("pointerdown", (event) => {
   event.stopPropagation();
+});
+closeSaveImagePanelButton.addEventListener("click", () => {
+  saveImagePanel.hidden = true;
+  saveImagePreview.removeAttribute("src");
 });
 inlineTextEditor.addEventListener("input", () => {
   if (!state.inlineEditing) return;
@@ -1129,7 +1583,16 @@ document.addEventListener("pointerdown", (event) => {
   }
   clearSelectedOverlay();
 });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    saveAutosaveProject().catch((error) => console.warn(error));
+  }
+});
+window.addEventListener("pagehide", () => {
+  saveAutosaveProject().catch((error) => console.warn(error));
+});
 setupResponsiveControls();
 updateOverlayList();
 drawEmptyState();
 updateStatus();
+restoreAutosaveOnStartup();

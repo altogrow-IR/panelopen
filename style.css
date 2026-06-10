@@ -115,13 +115,27 @@ button:active,
 
 .toggle-row,
 .color-row,
-.mode-group label,
 .overlay-group label {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 34px;
   font-size: 14px;
+}
+
+.panel-group {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--panel-soft);
+}
+
+.panel-group legend {
+  padding: 0 0 8px;
+  font-size: 17px;
+  font-weight: 700;
 }
 
 .color-row {
@@ -137,21 +151,6 @@ button:active,
   padding: 2px 6px;
   background: #ffffff;
   color: #17252d;
-}
-
-.overlay-group {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 12px 0 0;
-  border: 0;
-  border-top: 1px solid var(--panel-soft);
-}
-
-.overlay-group legend {
-  padding: 0 0 8px;
-  font-size: 17px;
-  font-weight: 700;
 }
 
 .overlay-group label {
@@ -196,16 +195,45 @@ button:active,
 }
 
 .mode-group {
-  margin: 0;
-  padding: 12px 0 0;
-  border: 0;
-  border-top: 1px solid var(--panel-soft);
+  grid-template-columns: 1fr 1fr;
 }
 
 .mode-group legend {
-  padding: 0 0 8px;
-  font-size: 17px;
+  grid-column: 1 / -1;
+}
+
+.mode-group label {
+  display: block;
+  cursor: pointer;
+}
+
+.mode-group input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mode-group label span {
+  min-height: 54px;
+  border: 2px solid var(--panel-soft);
+  border-radius: 4px;
+  background: #1f2b31;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  font-size: 14px;
   font-weight: 700;
+  text-align: center;
+}
+
+.mode-group input:checked + span {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: #102025;
 }
 
 .hint {
@@ -213,6 +241,13 @@ button:active,
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.mini-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .stage {
@@ -253,6 +288,38 @@ button:active,
 
 .inline-text-editor.is-active {
   display: block;
+}
+
+.save-image-panel {
+  position: absolute;
+  inset: 10px;
+  z-index: 3;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 4px;
+  background: rgba(17, 24, 32, 0.88);
+  color: #ffffff;
+}
+
+.save-image-panel[hidden] {
+  display: none;
+}
+
+.save-image-panel p {
+  margin: 0;
+  font-size: 13px;
+  text-align: center;
+}
+
+.save-image-panel img {
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+  background: #ffffff;
+  -webkit-touch-callout: default;
+  user-select: auto;
 }
 
 @media (max-width: 780px) {

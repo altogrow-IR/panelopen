@@ -3,95 +3,119 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>シルエットパネル開け Web版</title>
+    <title>パネル開けツール Web版</title>
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
     <main class="app-shell">
       <section class="toolbar" aria-label="操作パネル">
         <div class="title-block">
-          <h1>シルエット<br>パネル開け</h1>
-          <p id="statusText">立ち絵画像を読み込んでください。</p>
+          <h1>パネル開け<br>ツール</h1>
+          <p id="statusText">立ち絵/一枚絵画像を読み込んでください。</p>
         </div>
 
         <details class="controls-details" open>
           <summary>操作パネル</summary>
           <div class="controls-body">
-        <label class="file-button">
-          <input id="imageInput" type="file" accept="image/*">
-          <span>立ち絵を読み込む</span>
-        </label>
+            <fieldset class="panel-group mode-group">
+              <legend>モード</legend>
+              <label>
+                <input type="radio" name="mode" value="open" checked>
+                <span>パネルを開ける</span>
+              </label>
+              <label>
+                <input type="radio" name="mode" value="line">
+                <span>境界線を引く</span>
+              </label>
+            </fieldset>
 
-        <div class="button-grid">
-          <button id="resetButton" type="button">境界線をリセット</button>
-          <button id="cancelLineButton" type="button">現在の線をキャンセル</button>
-          <button id="removeLineButton" type="button">最後の線を消す</button>
-          <button id="openAllButton" type="button">すべて開ける</button>
-          <button id="closeAllButton" type="button">すべて閉じる</button>
-        </div>
+            <fieldset class="panel-group">
+              <legend>基本操作</legend>
+              <label class="file-button">
+                <input id="imageInput" type="file" accept="image/*">
+                <span>立ち絵/一枚絵を読み込む</span>
+              </label>
+              <div class="button-grid">
+                <button id="openAllButton" type="button">すべて開ける</button>
+                <button id="closeAllButton" type="button">すべて閉じる</button>
+                <button id="cancelLineButton" type="button">現在の線をキャンセル</button>
+                <button id="removeLineButton" type="button">最後の線を消す</button>
+                <button id="resetButton" type="button">境界線をリセット</button>
+              </div>
+              <label class="toggle-row">
+                <input id="showLinesInput" type="checkbox" checked>
+                <span>境界線を表示</span>
+              </label>
+              <label class="color-row">
+                <span>シルエット色</span>
+                <select id="silhouetteColorSelect" aria-label="シルエット色"></select>
+              </label>
+              <label class="color-row">
+                <span>境界線の色</span>
+                <select id="boundaryColorSelect" aria-label="境界線の色"></select>
+              </label>
+            </fieldset>
 
-        <label class="toggle-row">
-          <input id="showLinesInput" type="checkbox" checked>
-          <span>境界線を表示</span>
-        </label>
+            <fieldset class="panel-group">
+              <legend>背景</legend>
+              <label class="color-row">
+                <span>背景色</span>
+                <select id="backgroundColorSelect" aria-label="背景色"></select>
+              </label>
+              <label class="file-button compact">
+                <input id="backgroundImageInput" type="file" accept="image/*">
+                <span>背景画像を読み込む</span>
+              </label>
+              <button id="clearBackgroundImageButton" type="button">背景画像を消す</button>
+            </fieldset>
 
-        <label class="color-row">
-          <span>シルエット色</span>
-          <select id="silhouetteColorSelect" aria-label="シルエット色"></select>
-        </label>
+            <fieldset class="panel-group overlay-group">
+              <legend>文字・画像</legend>
+              <p class="mini-hint">追加済みの文字はダブルタップで直接編集できます。</p>
+              <label>
+                <span>追加する文字</span>
+                <input id="overlayTextInput" type="text" maxlength="40" placeholder="例: OPEN">
+              </label>
+              <label>
+                <span>文字色</span>
+                <select id="overlayTextColorSelect" aria-label="文字色"></select>
+              </label>
+              <label>
+                <span>文字フォント</span>
+                <select id="overlayTextFontSelect" aria-label="文字フォント"></select>
+              </label>
+              <label>
+                <span>文字サイズ</span>
+                <input id="overlayTextSizeInput" type="range" min="18" max="96" value="42">
+              </label>
+              <button id="addOverlayTextButton" type="button">文字を追加</button>
+              <label class="file-button compact">
+                <input id="overlayImageInput" type="file" accept="image/*">
+                <span>画像を追加</span>
+              </label>
+              <label>
+                <span>画像サイズ</span>
+                <input id="overlayImageSizeInput" type="range" min="10" max="90" value="38">
+              </label>
+              <div id="overlayList" class="overlay-list" aria-live="polite"></div>
+              <button id="removeSelectedOverlayButton" type="button">選択中の文字・画像を消す</button>
+            </fieldset>
 
-        <label class="color-row">
-          <span>境界線の色</span>
-          <select id="boundaryColorSelect" aria-label="境界線の色"></select>
-        </label>
+            <fieldset class="panel-group">
+              <legend>保存/読込</legend>
+              <div class="button-grid">
+                <button id="exportProjectButton" type="button">設定をエクスポート</button>
+                <label class="file-button compact">
+                  <input id="importProjectInput" type="file" accept="application/json,.json">
+                  <span>設定をインポート</span>
+                </label>
+              </div>
+            </fieldset>
 
-        <fieldset class="overlay-group">
-          <legend>シルエット上の文字・画像</legend>
-          <label>
-            <span>追加する文字</span>
-            <input id="overlayTextInput" type="text" maxlength="40" placeholder="例: OPEN">
-          </label>
-          <label>
-            <span>文字色</span>
-            <select id="overlayTextColorSelect" aria-label="文字色"></select>
-          </label>
-          <label>
-            <span>文字フォント</span>
-            <select id="overlayTextFontSelect" aria-label="文字フォント"></select>
-          </label>
-          <label>
-            <span>文字サイズ</span>
-            <input id="overlayTextSizeInput" type="range" min="18" max="96" value="42">
-          </label>
-          <button id="addOverlayTextButton" type="button">文字を追加</button>
-          <label class="file-button compact">
-            <input id="overlayImageInput" type="file" accept="image/*">
-            <span>画像を追加</span>
-          </label>
-          <label>
-            <span>画像サイズ</span>
-            <input id="overlayImageSizeInput" type="range" min="10" max="90" value="38">
-          </label>
-          <div id="overlayList" class="overlay-list" aria-live="polite"></div>
-          <button id="removeSelectedOverlayButton" type="button">選択中の文字・画像を消す</button>
-        </fieldset>
-
-        <fieldset class="mode-group">
-          <legend>モード</legend>
-          <label>
-            <input type="radio" name="mode" value="open" checked>
-            <span>パネルを開ける</span>
-          </label>
-          <label>
-            <input type="radio" name="mode" value="line">
-            <span>境界線を引く</span>
-          </label>
-        </fieldset>
-
-        <p class="hint">
-          境界線を引くモードでは、始点をタップしてから終点をタップします。
-          線がシルエットを分割し、分割された部位ごとに開けられます。
-        </p>
+            <p class="hint">
+              境界線を引くモードでは、始点をタップしてから終点をタップします。
+              線がシルエットを分割し、分割された部位ごとに開けられます。
+            </p>
           </div>
         </details>
       </section>
@@ -99,6 +123,11 @@
       <section class="stage" aria-label="キャンバス">
         <canvas id="mainCanvas" width="640" height="760"></canvas>
         <textarea id="inlineTextEditor" class="inline-text-editor" rows="1" maxlength="40" aria-label="文字を直接編集"></textarea>
+        <div id="saveImagePanel" class="save-image-panel" hidden>
+          <p>画像を長押しして保存できます。</p>
+          <img id="saveImagePreview" alt="保存用プレビュー">
+          <button id="closeSaveImagePanelButton" type="button">閉じる</button>
+        </div>
       </section>
     </main>
 
