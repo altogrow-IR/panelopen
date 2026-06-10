@@ -10,7 +10,7 @@
     <main class="app-shell">
       <section class="toolbar" aria-label="操作パネル">
         <div class="title-block">
-          <h1>パネル開け<br>ツール</h1>
+          <h1>パネル開けツール</h1>
           <p id="statusText">立ち絵/一枚絵画像を読み込んでください。</p>
         </div>
 
@@ -19,13 +19,21 @@
           <div class="controls-body">
             <fieldset class="panel-group mode-group">
               <legend>モード</legend>
-              <label>
+              <label class="mode-option">
                 <input type="radio" name="mode" value="open" checked>
                 <span>パネルを開ける</span>
               </label>
-              <label>
+              <label class="mode-option">
                 <input type="radio" name="mode" value="line">
                 <span>境界線を引く</span>
+              </label>
+              <p class="mini-hint">
+                境界線を引くモードでは、始点をタップしてから終点をタップします。
+                線がシルエットを分割し、分割された部位ごとに開けられます。
+              </p>
+              <label class="toggle-row">
+                <input id="showLinesInput" type="checkbox" checked>
+                <span>境界線を表示</span>
               </label>
             </fieldset>
 
@@ -42,10 +50,6 @@
                 <button id="removeLineButton" type="button">最後の線を消す</button>
                 <button id="resetButton" type="button">境界線をリセット</button>
               </div>
-              <label class="toggle-row">
-                <input id="showLinesInput" type="checkbox" checked>
-                <span>境界線を表示</span>
-              </label>
               <label class="color-row">
                 <span>シルエット色</span>
                 <select id="silhouetteColorSelect" aria-label="シルエット色"></select>
@@ -104,18 +108,13 @@
             <fieldset class="panel-group">
               <legend>保存/読込</legend>
               <div class="button-grid">
-                <button id="exportProjectButton" type="button">設定をエクスポート</button>
+                <button id="exportProjectButton" type="button">パネル状態を保存</button>
                 <label class="file-button compact">
                   <input id="importProjectInput" type="file" accept="application/json,.json">
-                  <span>設定をインポート</span>
+                  <span>パネル状態を読込</span>
                 </label>
               </div>
             </fieldset>
-
-            <p class="hint">
-              境界線を引くモードでは、始点をタップしてから終点をタップします。
-              線がシルエットを分割し、分割された部位ごとに開けられます。
-            </p>
           </div>
         </details>
       </section>
