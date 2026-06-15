@@ -18,6 +18,7 @@ const controlsDetails = document.querySelector(".controls-details");
 const imageInput = document.getElementById("imageInput");
 const importProjectInput = document.getElementById("importProjectInput");
 const exportProjectButton = document.getElementById("exportProjectButton");
+const undoButton = document.getElementById("undoButton");
 const showLinesInput = document.getElementById("showLinesInput");
 const silhouetteColorSelect = document.getElementById("silhouetteColorSelect");
 const boundaryColorSelect = document.getElementById("boundaryColorSelect");
@@ -105,6 +106,8 @@ const state = {
   longPressTimer: null,
   autosaveTimer: null,
   restoringProject: false,
+  undoSnapshot: null,
+  overlayInputUndoCaptured: false,
 };
 
 function setupColorSelect(select, selectedValue) {
@@ -273,6 +276,7 @@ function addTextOverlay() {
 
   const selected = selectedOverlayObject();
   if (selected && selected.type === "text") {
+    captureUndoSnapshot();
     selected.text = text;
     selected.color = overlayTextColorSelect.value;
     selected.font = overlayTextFontSelect.value;
@@ -293,6 +297,7 @@ function addTextOverlay() {
     x: CANVAS_WIDTH / 2,
     y: CANVAS_HEIGHT / 2,
   };
+  captureUndoSnapshot();
   state.nextOverlayId += 1;
   state.overlayObjects.push(object);
   state.selectedOverlayId = object.id;
@@ -317,6 +322,7 @@ function addImageOverlay(image, name, dataUrl) {
     x: CANVAS_WIDTH / 2,
     y: CANVAS_HEIGHT / 2,
   };
+  captureUndoSnapshot();
   state.nextOverlayId += 1;
   state.overlayObjects.push(object);
   state.selectedOverlayId = object.id;
@@ -327,6 +333,7 @@ function addImageOverlay(image, name, dataUrl) {
 
 function removeSelectedOverlay() {
   if (state.selectedOverlayId === null) return;
+  captureUndoSnapshot();
   state.overlayObjects = state.overlayObjects.filter((object) => object.id !== state.selectedOverlayId);
   state.selectedOverlayId = state.overlayObjects.length > 0 ? state.overlayObjects[state.overlayObjects.length - 1].id : null;
   syncOverlayControls();
@@ -389,6 +396,32 @@ function buildProjectData() {
     overlayObjects: state.overlayObjects.map(serializeOverlayObject),
     nextOverlayId: state.nextOverlayId,
   };
+}
+
+function cloneProjectData(project) {
+  return JSON.parse(JSON.stringify(project));
+}
+
+function updateUndoButton() {
+  undoButton.disabled = !state.undoSnapshot;
+}
+
+function captureUndoSnapshot() {
+  if (!state.originalImageDataUrl || state.restoringProject) return;
+  state.undoSnapshot = cloneProjectData(buildProjectData());
+  updateUndoButton();
+}
+
+async function undoLastOperation() {
+  if (!state.undoSnapshot) return;
+
+  const snapshot = state.undoSnapshot;
+  await applyProjectData(snapshot, {
+    confirmReplace: false,
+    saveUndo: false,
+  });
+  state.undoSnapshot = null;
+  updateUndoButton();
 }
 
 function exportProject() {
@@ -535,6 +568,10 @@ async function applyProjectData(project, options = {}) {
     throw new Error("対応していない設定ファイルです。");
   }
 
+  if (options.saveUndo !== false) {
+    captureUndoSnapshot();
+  }
+
   state.restoringProject = true;
   try {
     const originalImage = await loadImageElement(project.originalImage.dataUrl);
@@ -592,6 +629,7 @@ function beginInlineTextEdit(object) {
   state.inlineEditing = {
     id: object.id,
     originalText: object.text,
+    undoSnapshot: state.originalImageDataUrl ? cloneProjectData(buildProjectData()) : null,
   };
   state.dragOverlay = null;
   state.selectedOverlayId = object.id;
@@ -631,6 +669,10 @@ function commitInlineTextEdit() {
   const object = state.overlayObjects.find((item) => item.id === state.inlineEditing.id);
   const text = inlineTextEditor.value.trim();
   if (object && object.type === "text") {
+    if (text && text !== state.inlineEditing.originalText && state.inlineEditing.undoSnapshot) {
+      state.undoSnapshot = state.inlineEditing.undoSnapshot;
+      updateUndoButton();
+    }
     object.text = text || state.inlineEditing.originalText;
     overlayTextInput.value = object.text;
     clampOverlayPosition(object);
@@ -651,6 +693,7 @@ function cancelInlineTextEdit() {
 
 function finishInlineTextEdit() {
   state.inlineEditing = null;
+  state.overlayInputUndoCaptured = false;
   inlineTextEditor.classList.remove("is-active");
   inlineTextEditor.value = "";
   updateOverlayList();
@@ -744,6 +787,7 @@ async function loadImageFromFile(file) {
   try {
     const dataUrl = await readFileAsDataUrl(file);
     const image = await loadImageElement(dataUrl);
+    captureUndoSnapshot();
     state.originalImage = image;
     state.originalImageDataUrl = dataUrl;
     prepareDisplayImages();
@@ -840,6 +884,7 @@ function makeSilhouetteCanvas(mask) {
 }
 
 function resetBoundaries() {
+  captureUndoSnapshot();
   state.boundaryLines = [];
   state.pendingLineStart = null;
   state.openedPanels = new Set();
@@ -853,6 +898,7 @@ function cancelCurrentLine() {
 }
 
 function removeLastLine() {
+  if (state.pendingLineStart || state.boundaryLines.length > 0) captureUndoSnapshot();
   if (state.pendingLineStart) {
     state.pendingLineStart = null;
   } else if (state.boundaryLines.length > 0) {
@@ -864,11 +910,13 @@ function removeLastLine() {
 }
 
 function openAllPanels() {
+  captureUndoSnapshot();
   state.openedPanels = new Set(state.panelMasks.map((_, index) => index));
   redraw();
 }
 
 function closeAllPanels() {
+  captureUndoSnapshot();
   state.openedPanels = new Set();
   redraw();
 }
@@ -1256,7 +1304,10 @@ function handleCanvasTap(event) {
     handleLineTap(point);
   } else {
     const panelIndex = panelIndexAt(point.x, point.y);
-    if (panelIndex !== null) state.openedPanels.add(panelIndex);
+    if (panelIndex !== null && !state.openedPanels.has(panelIndex)) {
+      captureUndoSnapshot();
+      state.openedPanels.add(panelIndex);
+    }
   }
   redraw();
 }
@@ -1270,6 +1321,7 @@ function handleLineTap(point) {
   const start = state.pendingLineStart;
   const distance = Math.abs(start.x - point.x) + Math.abs(start.y - point.y);
   if (distance > 8) {
+    captureUndoSnapshot();
     state.boundaryLines.push({ start, end: point });
     state.openedPanels = new Set();
     rebuildPanels();
@@ -1358,6 +1410,9 @@ function handleCanvasPointerDown(event) {
       id: overlayObject.id,
       offsetX: canvasPoint.x - overlayObject.x,
       offsetY: canvasPoint.y - overlayObject.y,
+      startX: overlayObject.x,
+      startY: overlayObject.y,
+      undoCaptured: false,
     };
     canvas.setPointerCapture(event.pointerId);
     redraw();
@@ -1376,8 +1431,18 @@ function handleCanvasPointerMove(event) {
   const selected = selectedOverlayObject();
   if (!point || !selected) return;
 
-  selected.x = point.x - state.dragOverlay.offsetX;
-  selected.y = point.y - state.dragOverlay.offsetY;
+  const nextX = point.x - state.dragOverlay.offsetX;
+  const nextY = point.y - state.dragOverlay.offsetY;
+  if (
+    !state.dragOverlay.undoCaptured &&
+    (Math.abs(nextX - state.dragOverlay.startX) > 1 || Math.abs(nextY - state.dragOverlay.startY) > 1)
+  ) {
+    captureUndoSnapshot();
+    state.dragOverlay.undoCaptured = true;
+  }
+
+  selected.x = nextX;
+  selected.y = nextY;
   clampOverlayPosition(selected);
   redraw();
 }
@@ -1401,7 +1466,18 @@ document.getElementById("cancelLineButton").addEventListener("click", cancelCurr
 document.getElementById("removeLineButton").addEventListener("click", removeLastLine);
 document.getElementById("openAllButton").addEventListener("click", openAllPanels);
 document.getElementById("closeAllButton").addEventListener("click", closeAllPanels);
-showLinesInput.addEventListener("change", redraw);
+undoButton.addEventListener("click", () => {
+  undoLastOperation().catch((error) => {
+    alert(error.message || "1つ前の状態に戻せませんでした。");
+  });
+});
+showLinesInput.addEventListener("change", () => {
+  const nextChecked = showLinesInput.checked;
+  showLinesInput.checked = !nextChecked;
+  captureUndoSnapshot();
+  showLinesInput.checked = nextChecked;
+  redraw();
+});
 
 setupColorSelect(silhouetteColorSelect, state.silhouetteColor);
 setupColorSelect(boundaryColorSelect, state.boundaryColor);
@@ -1410,6 +1486,7 @@ setupColorSelect(overlayTextColorSelect, state.overlayTextColor);
 setupFontSelect(overlayTextFontSelect, state.overlayTextFont);
 
 backgroundColorSelect.addEventListener("change", () => {
+  captureUndoSnapshot();
   state.backgroundColor = backgroundColorSelect.value;
   redraw();
 });
@@ -1420,6 +1497,7 @@ backgroundImageInput.addEventListener("change", (event) => {
   readFileAsDataUrl(file)
     .then((dataUrl) => Promise.all([loadImageElement(dataUrl), Promise.resolve(dataUrl)]))
     .then(([image, dataUrl]) => {
+      captureUndoSnapshot();
       state.backgroundImage = image;
       state.backgroundImageDataUrl = dataUrl;
       backgroundImageInput.value = "";
@@ -1431,12 +1509,14 @@ backgroundImageInput.addEventListener("change", (event) => {
     });
 });
 clearBackgroundImageButton.addEventListener("click", () => {
+  if (state.backgroundImageDataUrl) captureUndoSnapshot();
   state.backgroundImage = null;
   state.backgroundImageDataUrl = "";
   backgroundImageInput.value = "";
   redraw();
 });
 silhouetteColorSelect.addEventListener("change", () => {
+  captureUndoSnapshot();
   state.silhouetteColor = silhouetteColorSelect.value;
   if (state.characterMask) {
     state.silhouetteCanvas = makeSilhouetteCanvas(state.characterMask);
@@ -1444,10 +1524,12 @@ silhouetteColorSelect.addEventListener("change", () => {
   redraw();
 });
 boundaryColorSelect.addEventListener("change", () => {
+  captureUndoSnapshot();
   state.boundaryColor = boundaryColorSelect.value;
   redraw();
 });
 overlayTextColorSelect.addEventListener("change", () => {
+  captureUndoSnapshot();
   state.overlayTextColor = overlayTextColorSelect.value;
   const selected = selectedOverlayObject();
   if (selected && selected.type === "text") {
@@ -1456,6 +1538,7 @@ overlayTextColorSelect.addEventListener("change", () => {
   redraw();
 });
 overlayTextFontSelect.addEventListener("change", () => {
+  captureUndoSnapshot();
   state.overlayTextFont = overlayTextFontSelect.value;
   const selected = selectedOverlayObject();
   if (selected && selected.type === "text") {
@@ -1470,12 +1553,23 @@ overlayTextFontSelect.addEventListener("change", () => {
 overlayTextInput.addEventListener("input", () => {
   const selected = selectedOverlayObject();
   if (selected && selected.type === "text") {
+    if (!state.overlayInputUndoCaptured) {
+      captureUndoSnapshot();
+      state.overlayInputUndoCaptured = true;
+    }
     selected.text = overlayTextInput.value.trim();
     updateOverlayList();
   }
   redraw();
 });
+overlayTextInput.addEventListener("focus", () => {
+  state.overlayInputUndoCaptured = false;
+});
+overlayTextInput.addEventListener("blur", () => {
+  state.overlayInputUndoCaptured = false;
+});
 overlayTextSizeInput.addEventListener("input", () => {
+  captureUndoSnapshot();
   state.overlayTextSize = Number(overlayTextSizeInput.value);
   const selected = selectedOverlayObject();
   if (selected && selected.type === "text") {
@@ -1485,6 +1579,7 @@ overlayTextSizeInput.addEventListener("input", () => {
   redraw();
 });
 overlayImageSizeInput.addEventListener("input", () => {
+  captureUndoSnapshot();
   state.overlayImageSize = Number(overlayImageSizeInput.value);
   const selected = selectedOverlayObject();
   if (selected && selected.type === "image") {
@@ -1522,6 +1617,7 @@ removeSelectedOverlayButton.addEventListener("click", removeSelectedOverlay);
 
 document.querySelectorAll('input[name="mode"]').forEach((input) => {
   input.addEventListener("change", () => {
+    captureUndoSnapshot();
     state.mode = input.value;
     updateStatus();
   });
@@ -1592,6 +1688,7 @@ window.addEventListener("pagehide", () => {
   saveAutosaveProject().catch((error) => console.warn(error));
 });
 setupResponsiveControls();
+updateUndoButton();
 updateOverlayList();
 drawEmptyState();
 updateStatus();
